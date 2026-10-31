@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function updateVacationCountdown() {
   // Укажите дату начала каникул: Год, Месяц (0-11), Число, Часы, Минуты
-  const vacationDate = new Date(2026, 5, 1, 0, 0); // 23 марта 2026, 09:00
+  const vacationDate = new Date(2026, 11, 25, 0, 0); // 6 месяц
   const now = new Date();
   const diff = vacationDate - now;
 
@@ -122,7 +122,7 @@ function updateVacationCountdown() {
     const hText = hours + " " + getNoun(hours, 'час', 'часа', 'часов');
     const mText = minutes + " " + getNoun(minutes, 'минута', 'минуты', 'минут');
 
-    timerElement.innerHTML = `До летних каникул: <span>${dText}, ${hText}, ${mText}</span>`;
+    timerElement.innerHTML = `До зимних каникул: <span>${dText}, ${hText}, ${mText}</span>`;
   } else {
     timerElement.innerText = "Каникулы уже идут!";
   }
@@ -233,3 +233,11 @@ function updateHoliday() {
 }
 
 updateHoliday()
+function openFilt() {
+    // Находим наш мобильный блок фильтров по классу
+    const mobileFilter = document.querySelector('.filt');
+    
+    // Мгновенно переключаем класс 'active' (если его нет - добавит, если есть - удалит)
+    mobileFilter.classList.toggle('active');
+}
+window.openFilt = openFilt

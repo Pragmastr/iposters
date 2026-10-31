@@ -1,4 +1,4 @@
-import { renderFilteredPosts } from './render.js';
+import { renderFilteredPosts } from './posts.js';
 
 
 
@@ -145,7 +145,7 @@ window.renderLoader = {
             // Если доползли до 100%, останавливаем счетчик
             if (currentPercent >= 100) {
                 clearInterval(loaderInterval);
-                timerText.innerText = "0";
+                // timerText.innerText = "0";
             }
         }, 500); // 500мс = полсекунды
     },

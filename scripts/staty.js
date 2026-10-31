@@ -1,326 +1,18 @@
 
+
 import { supabase } from './render.js'; // или путь к файлу, где лежит конфиг Supabase
 
 // --------------------------------------------------
 
 // ФАЙЛ В КОТОРОМ ЛОГИКА ЛАЙКОВ И ТОП 3 СТАТЕЙ
 
-// window.likePost = async function () {
-//     // 1. Получаем ID из URL
-//     const params = new URLSearchParams(window.location.search);
-//     const id = params.get('id');
-
-//     // Проверка: если ID нет, выходим из функции
-//     if (!id || id === "undefined") {
-//         console.error("ID статьи не найден в URL!");
-//         return;
-//     }
-
-//     try {
-//         if (typeof confetti === 'function') {
-//             confetti({
-//                 particleCount: 2000,    // 5000 — это перебор, 2000 — идеально густо
-//                 spread: 360,
-//                 startVelocity: 1000,      // Взрыв во все стороны
-//                 startVelocity: 40,      // Мощный толчок, чтобы разлетелись дальше
-//                 origin: { x: 0.5, y: 0.4 }, // Чуть выше центра, чтобы летели дольше
-
-//                 // ДОБАВЛЯЕМ ХАОС:
-//                 drift: 0,               // Легкий "ветер" в сторону, чтобы круг ломался
-//                 ticks: 400,             // Частицы живут дольше
-//                 gravity: 0.5,           // Гравитация слабее — они ПАРЯТ, а не падают камнем
-//                 scalar: 1.4,            // Крупные куски радуги
-
-//                 // ВОТ ОНА, РАДУГА:
-//                 colors: [
-//                     '#ff0000', // Красный
-//                     '#ff7f00', // Оранжевый
-//                     '#ffff00', // Желтый
-//                     '#00ff00', // Зеленый
-//                     '#0000ff', // Синий
-//                     '#4b0082', // Индиго
-//                     '#9400d3', // Фиолетовый
-//                     '#ffffff'  // Белый для блеска
-//                 ],
-
-
-//             });
-
-
-//         }
-//         // 2. Запрашиваем лайки (используем наш проверенный ID)
-//         const { data: article, error: getError } = await supabase
-//             .from('articles')
-//             .select('likes')
-//             .eq('id', id) // Здесь теперь точно будет UUID, а не undefined
-//             .single();
-
-//         if (getError) throw getError;
-
-//         const currentLikes = article.likes || 0;
-
-//         // 3. Обновляем
-//         const { error: updateError } = await supabase
-//             .from('articles')
-//             .update({ likes: currentLikes + 1 })
-//             .eq('id', id);
-
-//         if (updateError) throw updateError;
-
-//         // 4. Обновляем интерфейс
-//         const likesSpan = document.getElementById('artLikes');
-//         if (likesSpan) {
-//             likesSpan.innerText = currentLikes + 1;
-//         }
-
-//     } catch (err) {
-//         console.error("Ошибка при лайке:", err.message);
-//     }
-// };
-
-window.likePost = async function (postId) {
-    // ВАЖНО: Теперь postId приходит как аргумент, а не из URL
-    if (!postId) return;
-
-    try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const user = session?.user;
-
-        // 1. Быстрая проверка для анонимов через localStorage
-        if (!user) {
-            const myLikes = JSON.parse(localStorage.getItem('my_likes') || '[]');
-            if (myLikes.includes(postId)) {
-                return Swal.fire("Упс!", "Вы уже поставили лайк этому посту", "info");
-            }
-        }
-
-        // 2. Запрос на сервер (передаем postId)
-        const response = await fetch('https://pro-info-api.onrender.com/api/like', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': session ? `Bearer ${session.access_token}` : ''
-            },
-            body: JSON.stringify({ postId: postId }) // Передаем наш ID
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            // --- ПРАЗДНИК ТОЛЬКО ПРИ УСПЕХЕ ---
-            if (typeof confetti === 'function') {
-                confetti({
-                    particleCount: 150,
-                    spread: 70,
-                    origin: { y: 0.7 },
-                    colors: ['#41cfff', '#ffffff', '#ff8000']
-                });
-            }
-
-            // Ищем спан именно ВНУТРИ этой карточки
-            const likesSpan = document.getElementById(`likes-count-${postId}`);
-            if (likesSpan) likesSpan.innerText = result.count;
-
-            // Записываем анониму в локалку
-            if (!user) {
-                const myLikes = JSON.parse(localStorage.getItem('my_likes') || '[]');
-                myLikes.push(postId);
-                localStorage.setItem('my_likes', JSON.stringify(myLikes));
-            }
-        } else if (result.error === "already_liked") {
-            Swal.fire("Упс!", "Вы уже поставили лайк этому посту", "info");
-        }
-
-    } catch (err) {
-        console.error("Like error:", err);
-    }
-};
 
 
 
 
 
-// Глобальный объект-счётчик лимитов (закинь в самый верх файла или оставь тут)
-if (!window.commentsLimit) {
-    window.commentsLimit = {};
-}
 
 
-window.loadComments = async function (postId, isLoadMore = false) {
-    // 1. Ищем список именно для ЭТОГО поста
-    const list = document.getElementById(`comments-list-${postId}`);
-    if (!list || !postId) return;
-
-    // 🔥 ИСПРАВИЛИ: Сначала ЖЕСТКО создаем объект, если его нет!
-    if (!window.commentsLimit) {
-        window.commentsLimit = {};
-    }
-
-    // Теперь эта проверка никогда не упадет в ошибку!
-    if (!window.commentsLimit[postId] || !isLoadMore) {
-        window.commentsLimit[postId] = 3;
-    } else if (isLoadMore) {
-        window.commentsLimit[postId] += 3;
-    }
-    try {
-        // Получаем сессию для проверки владельца (isOwner)
-        const { data: { session } } = await supabase.auth.getSession();
-        const user = session?.user;
-
-        // Запрос к твоему API на Рендере с динамическим лимитом
-        const currentLimit = window.commentsLimit[postId];
-        const response = await fetch(`https://pro-info-api.onrender.com/api/comments/${postId}?limit=${ currentLimit }`);
-        const comments = await response.json();
-
-        if (!comments || comments.length === 0) {
-            list.innerHTML = '<p style="color: gray; font-size: 14px; padding: 10px;">Пока никто не прокомментировал. Будьте первым!</p>';
-            
-            // Удаляем старую кнопку, если комментов нет
-            const oldBtn = document.getElementById(`load-more-btn-${postId}`);
-            if (oldBtn) oldBtn.remove();
-            return;
-        }
-
-        // 3. ОТРИСОВКА ВНУТРИ КАРТОЧКИ (Твой оригинальный сочный шаблон)
-        list.innerHTML = comments.map(c => {
-            const isOwner = user && user.id === c.user_id;
-
-            return `
-            <div style="background: #fcfcfc; padding: 10px; border-radius: 4px; margin-bottom: 20px; position: relative; border: 1px solid #ececec;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <b style="color: #333; font-size: 15px;">${c.user_name || 'Аноним'}</b>
-                    <small style="color: #000000; font-size: 11px; margin: 0 auto;">
-                        ${new Date(c.created_at).toLocaleString('ru-RU', {
-                            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-                        })}
-                    </small>
-                </div>
-                <p style="margin: 0; color: #333; font-size: 17px; line-height: 1.4;">${c.content || c.text}</p>
-                
-                ${isOwner ? `
-                    <button onclick="window.deleteComment('${c.id}', '${postId}')" 
-                        style="position: absolute; top: 5px; right: 5px; background: none; border: none; color: #ff4d4d; cursor: pointer; font-size: 14px;" 
-                        title="Удалить">🗑️</button>
-                ` : ''}
-            </div>`;
-        }).join('');
-
-        // 4. УМНОЕУПРАВЛЕНИЕ КНОПКОЙ "ПОКАЗАТЬ ЕЩЁ"
-        const oldBtn = document.getElementById(`load-more-btn-${postId}`);
-        if (oldBtn) oldBtn.remove();
-
-        // Если сервер вернул ровно столько комментов, сколько мы просили,
-        // значит в базе потенциально есть еще старые записи — рендерим кнопку!
-        if (comments.length >= currentLimit) {
-            list.insertAdjacentHTML('afterend', `
-                <button id="load-more-btn-${postId}" onclick="window.loadComments('${postId}', true)" 
-                    style="display: block; width: 100%; background: none; border: none; color: #007bff; cursor: pointer; font-size: 14px; padding: 10px 0; text-align: center; font-weight: bold; margin-top: -10px; margin-bottom: 15px;">
-                    Показать ещё комментарии...
-                </button>
-            `);
-        }
-
-    } catch (err) {
-        console.error("Ошибка загрузки комментов:", err);
-    }
-};
-
-
-// <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 30px; position: relative; box-shadow: 0 2px 5px rgb(235, 235, 235); border: 1px solid #bababa;">
-//     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-//         <b style="color: #333; font-family: Arial; font-size: 15px">${c.user_name || 'Аноним'}</b>
-//         <small style="color: #000000; margin: 0 auto; font-family: Arial">
-//             ${new Date(c.created_at).toLocaleString('ru-RU', {
-//     day: '2-digit',
-//     month: '2-digit',
-//     hour: '2-digit',
-//     minute: '2-digit'
-// })}
-//         </small>
-//     </div>
-//     <p style="margin: 0; color: #000000; line-height: 1.5;">${c.content}</p>
-
-//     <!-- КНОПКА УДАЛЕНИЯ (появится только у автора) -->
-//     ${isOwner ? `
-//         <button onclick="deleteComment('${c.id}')" 
-//             style="position: absolute; top: 10px; right: 10px; background: none; border: none; color: #ff4d4d; cursor: pointer; font-size: 18px; margin-right: auto" 
-//             title="Удалить">
-//             🗑️
-//         </button>
-//     ` : ''}
-// </div>
-
-
-
-// 2. ФУНКЦИЯ ОТПРАВКИ КОММЕНТАРИЯ
-window.sendComment = async function (postId) {
-    // ВАЖНО: Берем инпут именно из этой карточки по уникальному ID
-    const input = document.getElementById(`commentInput-${postId}`);
-    if (!input) return; // Страховка
-
-    const text = input.value.trim();
-
-    if (!text) return Swal.fire("Ошибка", "Напишите хотя бы пару слов!", "warning");
-
-    // Проверка сессии (всё как ты любишь)
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return openAuthModal();
-
-    try {
-        const response = await fetch(`https://pro-info-api.onrender.com/api/comments`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`
-            },
-            body: JSON.stringify({ postId, text }) // postId теперь берется из аргумента
-        });
-
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error);
-
-        input.value = ''; // Очищаем поле
-        
-        // ВАЖНО: Перезагружаем список комментов именно для этой статьи
-        if (window.loadComments) window.loadComments(postId); 
-        
-    } catch (err) {
-        Swal.fire("Ошибка", err.message, "error");
-    }
-};
-
-
-
-
-
-window.deleteComment = async function (commentId) {
-    const result = await Swal.fire({
-        title: 'Удалить комментарий?',
-        text: "Это действие нельзя отменить!",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ff4d4d',
-        cancelButtonColor: '#ccc',
-        confirmButtonText: 'Да, удалить!',
-        cancelButtonText: 'Отмена'
-    });
-
-    if (result.isConfirmed) {
-        try {
-            const { error } = await supabase
-                .from('comments')
-                .delete()
-                .eq('id', commentId);
-
-            if (error) throw error;
-
-            Swal.fire('Удалено!', 'Комментарий стерт.', 'success');
-            loadComments(); // Обновляем список сразу
-        } catch (err) {
-            Swal.fire('Ошибка', err.message, 'error');
-        }
-    }
-};
 
 
 
@@ -329,10 +21,10 @@ window.deleteComment = async function (commentId) {
 // А ПОТОМ МЫ ЗАПРАШИВАЕМ ДАННЫЕ ИЗ ФАЙЛА
 
 // ------------------------------------------------------------
-window.openCreateModal = async function() {
+window.openCreateModal = async function () {
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
-    const ak = user.email.split('@')[0];
+   const ak = user.user_metadata?.display_name || user.user_metadata?.name || user.email.split('@')[0] || 'Аноним';
     await Swal.fire({
         title: `Напишите статью, ${ak}!`,
         // Вставляем твою верстку прямо сюда
@@ -376,11 +68,11 @@ window.openCreateModal = async function() {
         
         </div>
         `,
-                        didOpen: () => {
+        didOpen: () => {
             const input = document.getElementById('postInput');
             const boldBtn = document.getElementById('btn-bold');
             const sizeSelect = document.getElementById('select-size');
- const fileInput = document.getElementById('fileInput'); 
+            const fileInput = document.getElementById('fileInput');
             // 1. Сначала вставляем текст (для окна редактирования)
             if (typeof oldText !== 'undefined' && input) {
                 input.innerHTML = oldText;
@@ -395,12 +87,12 @@ window.openCreateModal = async function() {
                 range.collapse(false); // false означает поставить курсор в конец текста
                 sel.removeAllRanges();
                 sel.addRange(range);
- if (fileInput) {
-            fileInput.addEventListener('change', (event) => {
-                // Вызываем функцию и передаем файлы напрямую из события браузера!
-                window.uploadFile(event.target.files);
-            });
-        }
+                if (fileInput) {
+                    fileInput.addEventListener('change', (event) => {
+                        // Вызываем функцию и передаем файлы напрямую из события браузера!
+                        window.uploadFile(event.target.files);
+                    });
+                }
 
                 const checkState = () => {
                     // Подсветка кнопки Ж
@@ -425,7 +117,7 @@ window.openCreateModal = async function() {
 
                 input.addEventListener('keyup', checkState);
                 input.addEventListener('mouseup', checkState);
-                
+
                 // Даем браузеру 50мс отобразить модалку и ровно считываем стили
                 setTimeout(() => {
                     checkState();
@@ -442,12 +134,12 @@ window.openCreateModal = async function() {
         cancelButtonText: 'Отмена',
         focusConfirm: false,
         // Собираем данные перед тем как вызвать твою функцию
-              preConfirm: () => {
+        preConfirm: () => {
             const title = document.getElementById('postTitle').value.trim();
             const image = document.getElementById('postImage').value.trim();
-            
+
             // 1. Для проверки берем ЧИСТЫЙ ТЕКСТ без HTML-тегов и пробелов
-            const checkText = document.getElementById('postInput').innerText.trim(); 
+            const checkText = document.getElementById('postInput').innerText.trim();
 
             // 2. Честная проверка: если букв нет — стопим отправку
             if (!title || !checkText) {
@@ -457,7 +149,7 @@ window.openCreateModal = async function() {
 
             // 3. Если всё ок — забираем со всеми тегами жирности и размеров!
             const htmlText = document.getElementById('postInput').innerHTML;
-            
+
             return { title, text: htmlText, image };
         }
 
@@ -478,13 +170,14 @@ window.openEditModal = async function (id) {
 
     // 2. Получаем ник для заголовка
     const { data: { session } } = await supabase.auth.getSession();
-    const ak = session?.user?.email.split('@')[0] || 'Автор';
-
+    const user = session?.user; 
+    // const ak = session?.user?.email.split('@')[0] || 'Автор';
+const ak = user.user_metadata?.display_name || user.user_metadata?.name || user.email.split('@')[0] || 'Аноним';
     // 3. Открываем твой стеклянный интерфейс
     const { value: formValues } = await Swal.fire({
         title: `Отредактируйте статью, ${ak}`,
         width: '1000px',
-        background: '#ffffff', 
+        background: '#ffffff',
         html: `
             <div class="glass-card admin-zone" style="height: auto; border: none; box-shadow: none; background: transparent; padding: 0;">
                 <input type="text" id="postImage" placeholder="Ссылка на картинку статьи (URL)..." value="${oldImage || ''}" style="width: 100%; margin-bottom: 10px;">
@@ -522,15 +215,15 @@ window.openEditModal = async function (id) {
                 "></div>
             </div>
         `,
-                didOpen: () => {
+        didOpen: () => {
             const input = document.getElementById('postInput');
             const boldBtn = document.getElementById('btn-bold');
             const sizeSelect = document.getElementById('select-size');
 
             if (typeof oldText !== 'undefined' && input) {
-    // .trim() уберет все скрытые табы и переносы строк, которые прилетели из верстки HTML
-    input.innerHTML = oldText.trim(); 
-}
+                // .trim() уберет все скрытые табы и переносы строк, которые прилетели из верстки HTML
+                input.innerHTML = oldText.trim();
+            }
             if (input) {
                 // 🔥 ЖЕСТКИЙ АВТОФОКУС: ставим курсор в самый конец текста
                 input.focus();
@@ -540,12 +233,12 @@ window.openEditModal = async function (id) {
                 range.collapse(false); // false означает поставить курсор в конец текста
                 sel.removeAllRanges();
                 sel.addRange(range);
-if (fileInput) {
-            fileInput.addEventListener('change', (event) => {
-                // Вызываем функцию и передаем файлы напрямую из события браузера!
-                window.uploadFile(event.target.files);
-            });
-        }
+                if (fileInput) {
+                    fileInput.addEventListener('change', (event) => {
+                        // Вызываем функцию и передаем файлы напрямую из события браузера!
+                        window.uploadFile(event.target.files);
+                    });
+                }
                 const checkState = () => {
                     // Подсветка кнопки Ж
                     if (boldBtn) {
@@ -569,7 +262,7 @@ if (fileInput) {
 
                 input.addEventListener('keyup', checkState);
                 input.addEventListener('mouseup', checkState);
-                
+
                 // Даем браузеру 50мс отобразить модалку и ровно считываем стили
                 setTimeout(() => {
                     checkState();
@@ -601,11 +294,11 @@ if (fileInput) {
     // 4. Если нажали "Сохранить" — пушим в базу без зависаний
     if (formValues) {
         Swal.close();
-        Swal.fire({ 
-            icon: 'success', 
-            title: 'Обновлено!', 
-            timer: 1000, 
-            showConfirmButton: false 
+        Swal.fire({
+            icon: 'success',
+            title: 'Обновлено!',
+            timer: 1000,
+            showConfirmButton: false
         });
 
         const cardTitle = document.querySelector(`#post-card-${id} h1`);
@@ -661,14 +354,14 @@ export function renderTrending(posts) {
         </button>
     `).join('');
 }
-window.scrollToPost = function(postId) {
+window.scrollToPost = function (postId) {
     const element = document.getElementById(`post-card-${postId}`);
     if (element) {
         element.scrollIntoView({
             behavior: 'smooth', // Плавный скролл
             block: 'start'      // Карточка встанет вверху экрана
         });
-        
+
         // Маленький спецэффект: подсветим карточку, чтобы юзер её не потерял
         element.style.boxShadow = "0 0 30px rgba(65, 207, 255, 0.6)";
         setTimeout(() => element.style.boxShadow = "none", 2000);
@@ -709,41 +402,6 @@ window.scrollToPost = function(postId) {
 //     return true;
 // };
 
-
-
-
-
-// export function handleSearch(event) {
-//     const term = event.target.value.toLowerCase().trim();
-
-//     // 1. Проверяем, есть ли данные для поиска
-//     if (!window.allPostsData) {
-//         console.warn("Данные еще не загружены!");
-//         return;
-//     }
-
-//     // 2. Фильтруем массив по заголовку и тексту
-//     const filtered = window.allPostsData.filter(post =>
-//         post.title.toLowerCase().includes(term) ||
-//         post.text.toLowerCase().includes(term)
-//     );
-
-//     // 3. Вызываем твою функцию отрисовки
-//     if (typeof window.renderFilteredPosts === 'function') {
-//         window.renderFilteredPosts(filtered, false);
-//     }
-
-//     // 4. Если пусто — пишем сообщение
-//     const container = document.getElementById('articles-container');
-//     if (filtered.length === 0 && container) {
-//         container.innerHTML = `<p style="color: #00d4ff; text-align: center; padding: 20px;">Ничего не найдено... 🔍</p>`;
-//     }
-// }
-
-// Делаем функцию доступной для HTML
-
-
-
 function formatTime(dateString) {
     const now = new Date();
     const past = new Date(dateString);
@@ -753,16 +411,16 @@ function formatTime(dateString) {
     if (diff < 3600) return Math.floor(diff / 60) + ' мин. назад';
     if (diff < 86400) return Math.floor(diff / 3600) + ' час. назад';
     if (diff < 259200) return Math.floor(diff / 86400) + ' дн. назад';
-    
+
     // Если очень старый пост, просто пишем дату
-    return past.toLocaleDateString(); 
+    return past.toLocaleDateString();
 }
 window.formatTime = formatTime
 function runSearch(el) {
     window.scrollTo({
-    top: 0,
-    behavior: 'smooth' // Делает прокрутку плавной
-});
+        top: 0,
+        behavior: 'smooth' // Делает прокрутку плавной
+    });
     // Исправлено: берем или переданный элемент (this), или активный инпут
     const input = el || document.activeElement;
     const grid = document.getElementById('dynamic-cards');
@@ -805,7 +463,7 @@ function runSearch(el) {
             result.innerHTML = term === "" ? "Мои посты" : `Результаты поиска для "${term}":`;
         }
         if (stats) {
-            stats.innerHTML = term === "" ? "" :`Результаты поиска для "${term}":`;
+            stats.innerHTML = term === "" ? "" : `Результаты поиска для "${term}":`;
         }
 
     }
@@ -850,37 +508,51 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-window.uploadFile = async function(files) {
+window.uploadFile = async function (files) {
     if (!files || files.length === 0) return;
-    const file = files[0];
+    
 
-    // 🔥 ВСТАВЬ СЮДА СВОЙ КЛЮЧ, КОТОРЫЙ СКОПИРОВАЛ НА САЙТЕ IMGBB
-    const IMGBB_API_KEY = 'e3025b531a8c99f617acd0ca0a5b3d10'; 
 
     const inputField = document.getElementById('postInput');
     Swal.showLoading(); // Включаем красивый лоадер SweetAlert
-  const imageUrls = []; 
+    const imageUrls = [];
     // Упаковываем файл в специальный формат для отправки по сети
-   
- 
 
+
+         // 🔥 НАДО СТРОГО ТАК (Метод .pop() забирает из массива СТРОГО чистую base64 строку без префикса!):
+    const toBase64 = file => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result.split(',').pop()); // <-- ДОБАВИЛИ .pop() НА КОНЦЕ!
+        reader.onerror = error => reject(error);
+    })
     try {
-          for (let i = 0; i < files.length; i++) {
-            const formData = new FormData();
-            formData.append('image', files[i]);
-        // Отправляем картинку в стабильное облако Imgbb вместо заблокированного Supabase
-        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-            method: 'POST',
-            body: formData
-        });
-   if (!response.ok) {
-                throw new Error(`Ошибка сети на файле №${i + 1}`);
+        for (let i = 0; i < files.length; i++) {
+              const currentFile = files[i];
+            const base64Data = await toBase64(currentFile);
+
+            // Штурмуем твой собственный бэкенд на Рендере (Тут CORS и 50-мегабайтные лимиты в идеале!)
+            const response = await fetch('https://pro-info-api.onrender.com/api/upload-image', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json' 
+                },
+                body: JSON.stringify({ imageBase64: base64Data })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                console.error("Детали ошибки твоего сервера Express:", errData);
+                throw new Error(`Ошибка на файле №${i + 1}`);
             }
-        const result = await response.json();
-if (result.success) {
-                imageUrls.push(result.data.url); // Собираем ссылки в массив
+
+            const result = await response.json();
+            
+            // Твой сервер возвращает готовую прокси-ссылку в поле result.url
+            if (result && result.url) {
+                imageUrls.push(result.url); // Ссылка на твой собственный image-proxy встает в массив карусели!
             } else {
-                throw new Error(result.error ? result.error.message : 'Ошибка загрузки одного из файлов');
+                throw new Error('Ошибка парсинга ответа бэкенда');
             }
         }
 
@@ -888,7 +560,7 @@ if (result.success) {
 
         // ВЕРНУЛИ ФОКУС НА ТЕКСТ ПЕРЕД ВСТАВКОЙ
         if (inputField) inputField.focus();
-     // 🔍 УМНАЯ ПРОВЕРКА НА СВЯЗКУ ПОДРЯД
+        // 🔍 УМНАЯ ПРОВЕРКА НА СВЯЗКУ ПОДРЯД
         const selection = window.getSelection();
         let targetNode = null;
 
@@ -935,25 +607,25 @@ if (result.success) {
             
             `;
 
-            document.execCommand('insertHTML', false, carouselHtml); 
+            document.execCommand('insertHTML', false, carouselHtml);
         } else {
             // --- ОБЫЧНАЯ ОДИНОЧНАЯ ВСТАВКА (если рядом ничего не было) ---
             document.execCommand('insertImage', false, imageUrls[0]);
         }
 
-        Swal.hideLoading(); 
+        Swal.hideLoading();
     } catch (err) {
-        console.error("Ошибка загрузки файла на Imgbb:", err.message);
+        console.error("Ошибка загрузки файла", err.message);
         Swal.fire("Ошибка сети", "Не удалось загрузить картинку. Попробуй другой файл.", "error");
     }
 };
-window.moveCarousel = function(carouselId, direction) {
+window.moveCarousel = function (carouselId, direction) {
     const carousel = document.getElementById(carouselId);
     if (!carousel) return;
 
     const track = carousel.querySelector('.carousel-track');
     const images = track.querySelectorAll('img');
-    
+
     // Храним текущий индекс слайда прямо в атрибуте HTML-элемента
     let currentIndex = parseInt(carousel.getAttribute('data-index') || '0');
 
@@ -972,7 +644,7 @@ window.moveCarousel = function(carouselId, direction) {
 };
 
 
-window.checkUrlHash = function() {
+window.checkUrlHash = function () {
     const hash = window.location.hash;
     if (!hash || !hash.startsWith('#post-')) return;
 
@@ -987,15 +659,15 @@ window.checkUrlHash = function() {
         if (targetPost) {
             clearInterval(checkInterval); // Выключаем таймер, цель поймана!
 
-        
-            
+
+
             // 2. Ждем 500мс (время полной CSS-анимации), пока пост раскроется до конца
             setTimeout(() => {
                 targetPost.scrollIntoView({
-            
+
                     block: 'center'     // Отцентрует раскрытый пост на экране!
                 });
-            }, 500); 
+            }, 500);
         }
     }, 100); // Проверяем экран каждые 100мс
 
@@ -1018,10 +690,10 @@ window.addEventListener('load', () => {
 });
 
 // 🔥 Перепиши начало функции прямо так, чтобы она мгновенно регистрировалась в браузере
-window.sharePost = async function(postId) {
+window.sharePost = async function (postId) {
     const postUrl = `${window.location.origin}/#post-${postId}`;
     const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-    
+
     // 🔥 ВОТ ТУТ ДОБАВИЛИ ПРОВЕРКУ: НАЛИЧИЕ SHARE *И* СЕНСОРНЫЙ ЭКРАН!
     if (navigator.share && isTouchDevice) {
         try {
@@ -1031,9 +703,9 @@ window.sharePost = async function(postId) {
             });
         } catch (err) { console.log('Отмена отправки'); }
     } else {
-         try {
+        try {
             await navigator.clipboard.writeText(postUrl);
-            
+
             Swal.fire({
                 toast: true,
                 position: 'top-end',
@@ -1042,9 +714,245 @@ window.sharePost = async function(postId) {
                 showConfirmButton: false,
                 timer: 2000
             });
-        }  catch (err) {
+        } catch (err) {
             Swal.fire('Ошибка', 'Не удалось скопировать ссылку', 'error');
         }
     }
 };
 
+// =========================================================================
+// 🦫 ИНТЕРФЕЙС ЦЕНТРАЛЬНОГО ПУЛЬТА УПРАВЛЕНИЯ (СТАТЬИ + КОММЕНТЫ)
+// =========================================================================
+
+window.currentUnapprovedCache = []; // Кэш комментариев
+
+window.checkAdminProfile = async function () {
+    const panel = document.getElementById('admin-moderation-panel');
+    const articlesList = document.getElementById('admin-articles-queue-list');
+    const commentsList = document.getElementById('admin-posts-queue');
+    const globalBadge = document.getElementById('global-mod-badge');
+    const artBadge = document.getElementById('articles-badge-count');
+    const commBadge = document.getElementById('comments-badge-count');
+
+    if (!panel || !articlesList || !commentsList) return;
+
+    // 1. Получаем токен сессии
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+        // 🔥 СУВЕРЕННЫЙ ЖЕСТКИЙ ФАЙРВОЛ: Считываем имя из метаданных базы данных
+    const currentAdminName = session.user.user_metadata?.display_name || session.user.user_metadata?.name || session.user.email.split('@')[0] || 'Аноним';
+
+    // 🔥 ФИКС СИНИОРА: Убрали .toLowerCase()! Врубили точное регистрозависимое совпадение!
+    // Теперь пустит ТОЛЬКО маленькую "kapibara". Любые большие буквы вызовут блок панели!
+    if (currentAdminName !== 'kapibara') {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Открываем пульт админа! Проверка пройдена символ в символ!
+    panel.style.display = 'block';
+
+
+    try {
+        // 2. ВЫСОКОНАГРУЖЕННЫЙ ПАРАЛЛЕЛЬНЫЙ ЗАПРОС К ДВУМ КАНТУРАМ КАРАНТИНА
+        const [resPosts, resComments] = await Promise.all([
+            fetch('https://pro-info-api.onrender.com/api/admin/unapproved-posts', { headers: { 'Authorization': `Bearer ${session.access_token}` } }),
+            fetch('https://pro-info-api.onrender.com/api/admin/unapproved', { headers: { 'Authorization': `Bearer ${session.access_token}` } })
+        ]);
+
+        const unapprovedPosts = await resPosts.json();
+        window.currentUnapprovedCache = await resComments.json();
+
+        // Общий счетчик нарушителей для главного баджа
+        const totalAlerts = (unapprovedPosts?.length || 0) + (window.currentUnapprovedCache?.length || 0);
+        if (totalAlerts > 0) {
+            globalBadge.style.display = 'inline-block';
+            globalBadge.innerText = totalAlerts;
+        } else {
+            globalBadge.style.display = 'none';
+        }
+
+        // =========================================================================
+        // РЕНДЕР КОНТУРА №1: СТАТЬИ (АРТИКЛЫ)
+        // =========================================================================
+        if (!unapprovedPosts || unapprovedPosts.length === 0) {
+            artBadge.style.display = 'none';
+            articlesList.innerHTML = '<p style="color: #28a745; font-size: 14px; font-weight: bold; margin: 0;">🏆 Нет новых статей на проверку. Вёрстка чиста!</p>';
+        } else {
+            artBadge.style.display = 'inline-block';
+            artBadge.innerText = unapprovedPosts.length;
+
+            articlesList.innerHTML = unapprovedPosts.map(p => `
+                <div style="background: #fafafa; border: 1px solid rgba(0,0,0,0.06); padding: 15px; border-radius: 6px; margin-bottom: 12px; position: relative;">
+                    <b style="color: #333; font-size: 14px;">👤 ${p.generatedName}</b>
+                    <h5 style="margin: 0 0 6px 0; font-size: 16px; color: #222; font-weight: bold;">📄 ${p.title}</h5>
+                    
+                    <!-- Если у статьи есть картинка - рендерим её микро-превью -->
+                    ${p.image ? `<img src="${p.image}" style="max-width: 120px; max-height: 80px; border-radius: 4px; margin-bottom: 8px; display: block; border: 1px solid #eee;">` : ''}
+                    
+                    <p style="margin: 0 0 12px 0; color: #444; font-size: 15px; line-height: 1.4; max-height: 100px; overflow: hidden; text-overflow: ellipsis;">${p.text || p.content || ''}</p>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="window.executePostAction('approve', '${p.id}')" style="background: #41cfff; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s;" onmouseover="this.style.background='#007bff'" onmouseout="this.style.background='#41cfff'">Одобрить статью 👍</button>
+                        <button onclick="window.executePostAction('delete', '${p.id}')" style="background: #ff4d4d; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s;" onmouseover="this.style.background='#cc0000'" onmouseout="this.style.background='#ff4d4d'">Удалить 🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // =========================================================================
+        // РЕНДЕР КОНТУРА №2: КОММЕНТАРИИ (Группировка по постам-аккордеонам)
+        // =========================================================================
+        if (!window.currentUnapprovedCache || window.currentUnapprovedCache.length === 0) {
+            commBadge.style.display = 'none';
+            commentsList.innerHTML = '<p style="color: #28a745; font-size: 14px; font-weight: bold; margin: 0;">🏆 Нет новых комментариев на проверку.</p>';
+            return;
+        }
+
+        commBadge.style.display = 'inline-block';
+        commBadge.innerText = window.currentUnapprovedCache.length;
+
+        const uniquePostsMap = {};
+        window.currentUnapprovedCache.forEach(c => {
+            if (!uniquePostsMap[c.post_id]) {
+                uniquePostsMap[c.post_id] = {
+                    id: c.post_id,
+                    title: c.post_title || `Статья ID: ${c.post_id.slice(0, 8)}...`,
+                    count: 0
+                };
+            }
+            uniquePostsMap[c.post_id].count++;
+        });
+
+        commentsList.innerHTML = Object.values(uniquePostsMap).map(p => `
+            <div onclick="window.openModModal('${p.id}', '${p.title}')" 
+                 style="background: #fafafa; border: 1px solid rgba(0,0,0,0.06); padding: 12px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: 0.2s;"
+                 onmouseover="this.style.borderColor='#41cfff'; this.style.background='#fcfcfc';" onmouseout="this.style.borderColor='rgba(0,0,0,0.06)'; this.style.background='#fafafa';">
+                <span style="font-size: 15px; font-weight: bold; color: #222;">📄 ${p.title}</span>
+                <span style="background: #41cfff; color: white; font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 12px;">${p.count} коммент.</span>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        console.error("Сбой пульта управления Капибары:", err);
+    }
+};
+
+// 3. УПРАВЛЕНИЕ СТАТЬЯМИ (ОДОБРЕНИЕ / УДАЛЕНИЕ)
+window.executePostAction = async function (action, postId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    try {
+        if (action === 'approve') {
+            const response = await fetch(`https://pro-info-api.onrender.com/api/posts/approve/${postId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${session.access_token}` }
+            });
+            if (!response.ok) throw new Error("Ошибка сервера при аппруве статьи");
+            Swal.fire("Статья выпущена! 📄👍", "Пост официально задеплоен на главную страницу сайта!", "success");
+        } else if (action === 'delete') {
+            const { error } = await supabase.from('articles').delete().eq('id', postId);
+            if (error) throw error;
+            Swal.fire("Уничтожено! 🗑️", "Статья навсегда стерта из базы данных Supabase.", "success");
+        }
+
+        window.checkAdminProfile(); // Мгновенный ререндер интерфейса
+    } catch (err) {
+        Swal.fire("Ошибка действия над статьей", err.message, "error");
+    }
+};
+
+// 4. ОТКРЫТИЕ МОДАЛКИ С КОММЕНТАМИ К КОНКРЕТНОМУ ПОСТУ
+window.openModModal = function (postId, postTitle) {
+    const modal = document.getElementById('mod-comment-modal');
+    const modalTitle = document.getElementById('modal-post-title');
+    const stream = document.getElementById('modal-comments-stream');
+    if (!modal || !stream) return;
+
+    modalTitle.innerText = `Модерация комментов: ${postTitle}`;
+    const postComments = window.currentUnapprovedCache.filter(c => c.post_id === postId);
+
+    if (postComments.length === 0) {
+        window.closeModModal();
+        window.checkAdminProfile();
+        return;
+    }
+
+    stream.innerHTML = postComments.map(c => `
+        <div style="background: #fcfcfc; border: 1px solid #ececec; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <b style="color: #333; font-size: 14px;">👤 ${c.user_name}</b>
+                <small style="color: #999; font-size: 11px;">${new Date(c.created_at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</small>
+            </div>
+            <p style="margin: 0 0 12px 0; color: #222; font-size: 16px; line-height: 1.4;">${c.content || c.text}</p>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="window.executeAdminAction('approve', '${c.id}', '${postId}', '${postTitle}')" style="background: #41cfff; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px;">Одобрить 👍</button>
+                <button onclick="window.executeAdminAction('delete', '${c.id}', '${postId}', '${postTitle}')" style="background: #ff4d4d; color: white; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px;">Удалить 🗑️</button>
+            </div>
+        </div>
+    `).join('');
+    modal.style.display = 'flex';
+};
+
+window.closeModModal = function () {
+    const modal = document.getElementById('mod-comment-modal');
+    if (modal) modal.style.display = 'none';
+};
+
+// =========================================================================
+// 5. ДЕЙСТВИЯ НАД КОММЕНТАМИ ВНУТРИ МОДАЛКИ (ОДОБРЕНИЕ / УДАЛЕНИЕ)
+// =========================================================================
+window.executeAdminAction = async function (action, commentId, postId, postTitle) {
+    // 1. Вытаскиваем токен сессии Капибары
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    try {
+        let response;
+        if (action === 'approve') {
+            // 🔥 ЖЕСТКИЙ ФИКС: Точно прописали /api/ перед comments/approve!
+            // Передаем токен Bearer в заголовках Headers для верификации на сервере Express
+            response = await fetch(`https://pro-info-api.onrender.com/api/comments/approve/${commentId}`, {
+                method: 'PATCH',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}` 
+                }
+            });
+            
+            // Если бэкенд выплюнул ошибку (например, ты вошел не под Капибарой)
+            if (response.status === 403) throw new Error("У вас нет прав админа Капибары! 🛑");
+            if (!response.ok) throw new Error("Ошибка сервера при одобрении");
+            
+        } else if (action === 'delete') {
+            // Уничтожаем коммент напрямую через клиент Supabase
+            // Ядерный каскад на уровне базы автоматически сотрет все ответы на него!
+            const { error } = await supabase.from('comments').delete().eq('id', commentId);
+            if (error) throw error;
+        }
+
+        // 2. РЕАКТИВНЫЙ АПДЕЙТ ИНТЕРФЕЙСА БЕЗ МОРГАНИЯ ЭКРАНА
+        // На лету вырезаем отработанный комментарий из локального кэша фронтенда
+        window.currentUnapprovedCache = window.currentUnapprovedCache.filter(c => c.id != commentId);
+        
+        // Перерисовываем модальное окно для этого поста, чтобы список обновился мгновенно!
+        window.openModModal(postId, postTitle);
+        
+    } catch (err) {
+        Swal.fire("Ошибка действия над комментарием", err.message, "error");
+    }
+};
+// Вставляй этот бронебойный триггер в самый-самый конец файла staty.js:
+document.addEventListener("DOMContentLoaded", () => {
+    // Проверяем, что глобальный объект supabase уже точно инициализирован в памяти!
+    if (window.supabase && typeof window.checkAdminProfile === "function") {
+        window.checkAdminProfile();
+    } else {
+        // Страховка: если render.js еще грузится, даем микро-таймаут в 100 миллисекунд
+        setTimeout(() => {
+            if (typeof window.checkAdminProfile === "function") window.checkAdminProfile();
+        }, 100);
+    }
+});
